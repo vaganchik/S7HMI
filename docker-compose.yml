@@ -31,6 +31,7 @@ services:
       timescaledb:
         condition: service_healthy
     environment:
+      - ArchiverMode=Postgres
       - ConnectionStrings__Postgres=Host=timescaledb;Port=5432;Database=s7_scada;Username=postgres;Password=postgres;
       - PlcConnection__IpAddress=192.168.0.1
       - PlcConnection__CpuType=S71500

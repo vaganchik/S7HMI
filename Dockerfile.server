@@ -1,7 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
 WORKDIR /app
 
-COPY S7HmiServer.sln ./
+COPY S7HmiServer.sln S7HmiServer.slnx* ./
 COPY src/S7Hmi.Core/S7Hmi.Core.csproj src/S7Hmi.Core/
 COPY src/S7Hmi.Driver.S7/S7Hmi.Driver.S7.csproj src/S7Hmi.Driver.S7/
 COPY src/S7Hmi.TiaOpenness/S7Hmi.TiaOpenness.csproj src/S7Hmi.TiaOpenness/

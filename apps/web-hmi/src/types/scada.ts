@@ -3,7 +3,7 @@
  * Стандарт ISA-101 (High-Performance HMI)
  */
 
-export type MechanismType = 'motor' | 'fan' | 'saw' | 'conveyor' | 'lift' | 'burner' | 'pump' | 'valve';
+export type MechanismType = 'motor' | 'fan' | 'saw' | 'conveyor' | 'lift' | 'burner' | 'pump' | 'valve' | 'exhaust';
 
 export type MechanismState = 'stopped' | 'running' | 'fault' | 'warning' | 'starting' | 'stopping';
 

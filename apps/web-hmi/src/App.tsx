@@ -71,7 +71,17 @@ export const App: React.FC = () => {
     }
   });
 
-  const handleMechanismCommand = (id: string, command: string, payload?: any) => {
+  const handleMechanismCommand = async (id: string, command: string, payload?: any): Promise<boolean> => {
+    // Отправка команды управления в ПЛК
+    const cmdTag = `${id}.cmd.${command}`;
+    const valueToWrite = payload !== undefined ? payload : true;
+    
+    try {
+      await writeTag(cmdTag, valueToWrite);
+    } catch (e) {
+      console.warn(`Failed to send command ${command} to PLC for ${id}:`, e);
+    }
+
     setMechanisms((prev) => {
       const current = prev[id] || {
         id,
@@ -89,10 +99,12 @@ export const App: React.FC = () => {
       } else if (command === 'set_mode') {
         return { ...prev, [id]: { ...current, mode: payload } };
       } else if (command === 'reset_fault') {
-        return { ...prev, [id]: { ...current, state: 'stopped' } };
+        return { ...prev, [id]: { ...current, state: 'stopped', faultMessage: undefined } };
       }
       return prev;
     });
+
+    return true;
   };
 
   const handleOpenFullTrend = (tagId: string) => {

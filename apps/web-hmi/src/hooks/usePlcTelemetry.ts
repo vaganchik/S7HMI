@@ -56,33 +56,6 @@ const DEFAULT_TAGS: PlcTagDefinition[] = [
   }
 ];
 
-const INITIAL_TAG_VALUES: Record<string, TagValue> = {
-  'furnace.zone1.temperature': {
-    tagId: 'furnace.zone1.temperature',
-    value: 642.5,
-    quality: TagQuality.Good,
-    timestamp: new Date().toISOString()
-  },
-  'furnace.zone1.pressure': {
-    tagId: 'furnace.zone1.pressure',
-    value: 3.42,
-    quality: TagQuality.Good,
-    timestamp: new Date().toISOString()
-  },
-  'furnace.pump.running': {
-    tagId: 'furnace.pump.running',
-    value: true,
-    quality: TagQuality.Good,
-    timestamp: new Date().toISOString()
-  },
-  'furnace.valve.open': {
-    tagId: 'furnace.valve.open',
-    value: true,
-    quality: TagQuality.Good,
-    timestamp: new Date().toISOString()
-  }
-};
-
 export function usePlcTelemetry() {
   const [plcStatus, setPlcStatus] = useState<PlcStatus | null>({
     id: 'PLC-1',
@@ -90,33 +63,51 @@ export function usePlcTelemetry() {
     ipAddress: '192.168.0.1',
     port: 102,
     cpuType: 'S71500',
-    isConnected: true,
-    lastRoundTripTimeMs: 1.5
+    isConnected: false,
+    lastRoundTripTimeMs: 0
   });
 
   const [tags, setTags] = useState<PlcTagDefinition[]>(DEFAULT_TAGS);
-  const [tagValues, setTagValues] = useState<Record<string, TagValue>>(INITIAL_TAG_VALUES);
+  const [tagValues, setTagValues] = useState<Record<string, TagValue>>({});
 
   useEffect(() => {
-    // 1. Initial REST fetch
+    let isMounted = true;
+
+    // 1. Первичная загрузка метаданных тегов и статуса через REST
     fetch('/api/tags')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) setTags(data);
+        if (isMounted && Array.isArray(data) && data.length > 0) setTags(data);
+      })
+      .catch(() => {});
+
+    fetch('/api/tags/values')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((values) => {
+        if (isMounted && values && typeof values === 'object') {
+          setTagValues(values);
+        }
       })
       .catch(() => {});
 
     fetch('/api/plc/status')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data) setPlcStatus(data);
+        if (isMounted && data) setPlcStatus(data);
       })
       .catch(() => {});
 
-    // 2. SignalR subscription
-    signalRService.startConnection().catch(console.error);
+    // 2. Подключение SignalR для получения live-телеметрии в реальном времени
+    signalRService.startConnection().then(() => {
+      signalRService.getInitialValues().then((initial) => {
+        if (isMounted && initial && Object.keys(initial).length > 0) {
+          setTagValues((prev) => ({ ...prev, ...initial }));
+        }
+      });
+    }).catch(console.error);
 
     signalRService.onTagUpdate((u: TagValueUpdate) => {
+      if (!isMounted) return;
       setTagValues((prev) => ({
         ...prev,
         [u.tagId]: { tagId: u.tagId, value: u.value, quality: u.quality, timestamp: u.timestamp }
@@ -124,6 +115,7 @@ export function usePlcTelemetry() {
     });
 
     signalRService.onBatchUpdate((updates: TagValueUpdate[]) => {
+      if (!isMounted) return;
       setTagValues((prev) => {
         const next = { ...prev };
         for (const u of updates) {
@@ -134,6 +126,7 @@ export function usePlcTelemetry() {
     });
 
     signalRService.onPlcStatus((plcId, isConnected, rttMs) => {
+      if (!isMounted) return;
       setPlcStatus((prev) =>
         prev
           ? { ...prev, isConnected, lastRoundTripTimeMs: rttMs }
@@ -149,44 +142,39 @@ export function usePlcTelemetry() {
       );
     });
 
-    // 3. Fallback smooth simulation timer
-    const interval = setInterval(() => {
-      setTagValues((prev) => {
-        const t = (prev['furnace.zone1.temperature']?.value as number) || 642.0;
-        const p = (prev['furnace.zone1.pressure']?.value as number) || 3.4;
-        const dt = (Math.random() - 0.48) * 0.6;
-        const dp = (Math.random() - 0.49) * 0.04;
-
-        return {
-          ...prev,
-          'furnace.zone1.temperature': {
-            ...prev['furnace.zone1.temperature'],
-            value: Number((t + dt).toFixed(1)),
-            timestamp: new Date().toISOString()
-          },
-          'furnace.zone1.pressure': {
-            ...prev['furnace.zone1.pressure'],
-            value: Number((p + dp).toFixed(2)),
-            timestamp: new Date().toISOString()
-          }
-        };
-      });
-    }, 500);
-
-    return () => clearInterval(interval);
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const writeTag = async (tagId: string, value: any): Promise<boolean> => {
-    setTagValues((prev) => ({
-      ...prev,
-      [tagId]: {
-        tagId,
-        value,
-        quality: TagQuality.Good,
-        timestamp: new Date().toISOString()
+    const previousValue = tagValues[tagId];
+    
+    // Отправляем команду записи на сервер (REST/SignalR)
+    const success = await signalRService.writeTagValue(tagId, value);
+
+    if (success) {
+      // Обновляем значение только после подтверждения от сервера/ПЛК
+      setTagValues((prev) => ({
+        ...prev,
+        [tagId]: {
+          tagId,
+          value,
+          quality: TagQuality.Good,
+          timestamp: new Date().toISOString()
+        }
+      }));
+      return true;
+    } else {
+      // В случае ошибки восстанавливаем предыдущее состояние
+      if (previousValue) {
+        setTagValues((prev) => ({
+          ...prev,
+          [tagId]: previousValue
+        }));
       }
-    }));
-    return await signalRService.writeTagValue(tagId, value);
+      return false;
+    }
   };
 
   const addImportedTags = (newTags: PlcTagDefinition[]) => {

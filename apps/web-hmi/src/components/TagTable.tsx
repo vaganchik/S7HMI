@@ -51,7 +51,7 @@ export const TagTable: React.FC<TagTableProps> = ({
     setGlobalArchiveInterval(ms);
     setIsUpdatingGlobalInterval(true);
     try {
-      await fetch('http://localhost:5000/api/archiver/settings', {
+      await fetch('/api/archiver/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ defaultIntervalMs: ms })
@@ -75,7 +75,8 @@ export const TagTable: React.FC<TagTableProps> = ({
     if (!addr) return '---';
     if (typeof addr === 'string') return addr;
     if (addr.dbNumber !== undefined) {
-      if (addr.bitNumber !== undefined && addr.bitNumber >= 0 && addr.dataType === 1) {
+      const isBool = addr.dataType === 'Bool' || addr.dataType === 0 || addr.dataType === 1;
+      if (addr.bitNumber !== undefined && addr.bitNumber >= 0 && isBool) {
         return `DB${addr.dbNumber}.DBX${addr.startByte}.${addr.bitNumber}`;
       }
       return `DB${addr.dbNumber}.DBD${addr.startByte}`;

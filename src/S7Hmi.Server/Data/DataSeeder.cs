@@ -203,7 +203,11 @@ public static class DataSeeder
 
         if (repo is SqliteHistoryRepository sqliteRepo)
         {
-            sqliteRepo.AddBatchAsync(updates).GetAwaiter().GetResult();
+            var recent = sqliteRepo.GetHistoryAsync("furnace.zone1.temperature", DateTime.UtcNow.AddHours(-1), DateTime.UtcNow, 1).GetAwaiter().GetResult();
+            if (recent.Count == 0)
+            {
+                sqliteRepo.AddBatchAsync(updates).GetAwaiter().GetResult();
+            }
         }
         else if (repo is InMemoryHistoryRepository inMemRepo)
         {

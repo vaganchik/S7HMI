@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using S7Hmi.Archiver.Postgres.Repositories;
 using S7Hmi.Archiver.Postgres.Services;
 using S7Hmi.Core.Interfaces;
@@ -34,7 +35,13 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 3. Регистрация ядра, драйвера ПЛК и хранилищ
+// Настройка сериализации Enum в виде строк для согласованности с Frontend
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
+
+// 3. Регистрация ядра, безопасности, драйвера ПЛК и хранилищ
 var plcConfig = builder.Configuration.GetSection("PlcConnection").Get<PlcConnectionConfig>() ?? new PlcConnectionConfig();
 var pgConnectionString = builder.Configuration.GetConnectionString("Postgres") ?? "Host=localhost;Database=s7_scada;Username=postgres;Password=postgres";
 bool useSimulator = builder.Configuration.GetValue<bool>("UseSimulator", true);
@@ -47,6 +54,7 @@ builder.Services.AddSingleton<ITagRegistry>(tagRegistry);
 builder.Services.AddSingleton<ITagDataCache, TagDataCache>();
 builder.Services.AddSingleton<IArchiverQueue, ChannelArchiverQueue>();
 builder.Services.AddSingleton<IAlarmEngine, AlarmEngine>();
+builder.Services.AddSingleton<IHmiSecurityService, HmiSecurityService>();
 
 if (useSimulator)
 {
@@ -64,7 +72,10 @@ var sqliteConnectionString = builder.Configuration.GetConnectionString("Sqlite")
 
 if (string.Equals(archiverMode, "Postgres", StringComparison.OrdinalIgnoreCase))
 {
-    Log.Information("Using PostgreSQL / TimescaleDB Archiver at {ConnectionString}", pgConnectionString);
+    // Маскирование паролей в строке подключения для безопасности логов (P1)
+    var maskedConnString = MaskConnectionString(pgConnectionString);
+    Log.Information("Using PostgreSQL / TimescaleDB Archiver ({MaskedConnString})", maskedConnString);
+
     builder.Services.AddSingleton<ITagHistoryRepository>(new TagHistoryRepository(pgConnectionString));
     builder.Services.AddHostedService(sp => new PostgresBatchArchiverService(
         sp.GetRequiredService<IArchiverQueue>(),
@@ -96,8 +107,12 @@ else
 // 4. Регистрация фоновой службы опроса ПЛК
 builder.Services.AddHostedService<PlcPollingWorker>();
 
-// 5. SignalR & Web API
-builder.Services.AddSignalR();
+// 5. SignalR & Web API с поддержкой строковых Enum
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 builder.Services.AddEndpointsApiExplorer();
 
 var app = builder.Build();
@@ -122,3 +137,16 @@ DataSeeder.SeedSampleData(
 Log.Information("S7 Industrial HMI Server ready. Listening on http://localhost:5000");
 
 app.Run();
+
+static string MaskConnectionString(string connStr)
+{
+    try
+    {
+        var builder = new Npgsql.NpgsqlConnectionStringBuilder(connStr);
+        return $"Host={builder.Host};Port={builder.Port};Database={builder.Database};Username={builder.Username};Password=***";
+    }
+    catch
+    {
+        return "Host=configured;Database=s7_scada;Credentials=***";
+    }
+}

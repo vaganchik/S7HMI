@@ -2,11 +2,16 @@ using Microsoft.AspNetCore.Mvc;
 using S7Hmi.Archiver.Postgres.Repositories;
 using S7Hmi.Core.Interfaces;
 using S7Hmi.Core.Models;
+using S7Hmi.Core.Services;
+using S7Hmi.Server.Services;
 
 namespace S7Hmi.Server.Endpoints;
 
 public static class TagEndpoints
 {
+    private static readonly string[] OperatorWriteRoles = ["operator", "technologist", "engineer", "admin"];
+    private static readonly string[] EngineerConfigRoles = ["engineer", "admin"];
+
     public static void MapTagEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/tags");
@@ -39,31 +44,72 @@ public static class TagEndpoints
             return Results.Ok(history);
         });
 
-        // Запись значения тега в ПЛК
+        // Запись значения тега в ПЛК (Fail-Closed конвейер + RBAC)
         group.MapPost("/{id}/write", async (
             string id,
-            [FromBody] object value,
+            [FromBody] object rawValue,
+            HttpContext httpContext,
             ITagRegistry registry,
-            IPlcDriver driver) =>
+            IPlcDriver driver,
+            IHmiSecurityService security) =>
         {
-            var tag = registry.GetTag(id);
-            if (tag == null) return Results.NotFound(new { error = $"Tag '{id}' not found" });
-            if (tag.ReadOnly) return Results.BadRequest(new { error = $"Tag '{id}' is read-only" });
+            // 1. Проверка авторизации
+            if (!security.IsAuthorized(httpContext, OperatorWriteRoles, out var userName, out var userRole))
+            {
+                security.LogAudit(userName, userRole, "WRITE_TAG_DENIED", id, rawValue, false, "Unauthorized or insufficient role");
+                return Results.Json(new { error = "Действие требует авторизации с ролью оператора, технолога, наладчика или администратора." }, statusCode: 403);
+            }
 
-            bool success = await driver.WriteTagAsync(tag, value);
-            return success ? Results.Ok(new { status = "success", id, value }) : Results.Problem("Failed to write to PLC");
+            var tag = registry.GetTag(id);
+            if (tag == null)
+            {
+                security.LogAudit(userName, userRole, "WRITE_TAG_FAILED", id, rawValue, false, "Tag not found");
+                return Results.NotFound(new { error = $"Тег '{id}' не найден в реестре." });
+            }
+
+            // 2. Валидация типа, ReadOnly, Min/Max и Interlock (ADR-004)
+            var (valid, parsedValue, validationError) = TagValueParser.TryParseAndValidate(rawValue, tag);
+            if (!valid || parsedValue == null)
+            {
+                security.LogAudit(userName, userRole, "WRITE_TAG_REJECTED", id, rawValue, false, validationError);
+                return Results.BadRequest(new { error = validationError });
+            }
+
+            // 3. Отправка в драйвер ПЛК
+            try
+            {
+                bool success = await driver.WriteTagAsync(tag, parsedValue);
+                security.LogAudit(userName, userRole, "WRITE_TAG_EXECUTED", id, parsedValue, success, success ? "OK" : "Driver write failed");
+
+                return success
+                    ? Results.Ok(new { status = "success", id, value = parsedValue, timestamp = DateTime.UtcNow })
+                    : Results.Problem("Ошибка записи в контроллер ПЛК.");
+            }
+            catch (Exception ex)
+            {
+                security.LogAudit(userName, userRole, "WRITE_TAG_EXCEPTION", id, parsedValue, false, ex.Message);
+                return Results.Problem($"Исключение при записи: {ex.Message}");
+            }
         });
 
         // Настройка времени архивации индивидуального тега
         group.MapPut("/{id}/archive", (
             string id,
             [FromBody] TagArchiveConfigRequest request,
-            ITagRegistry registry) =>
+            HttpContext httpContext,
+            ITagRegistry registry,
+            IHmiSecurityService security) =>
         {
+            if (!security.IsAuthorized(httpContext, EngineerConfigRoles, out var userName, out var userRole))
+            {
+                return Results.Json(new { error = "Требуются права наладчика или администратора." }, statusCode: 403);
+            }
+
             var tag = registry.GetTag(id);
             if (tag == null) return Results.NotFound(new { error = $"Tag '{id}' not found" });
 
             bool updated = registry.UpdateTagArchiveConfig(id, request.ArchiveEnabled, request.ArchiveIntervalMs, request.Deadband);
+            security.LogAudit(userName, userRole, "UPDATE_TAG_ARCHIVE", id, request, updated);
             return updated ? Results.Ok(tag) : Results.BadRequest();
         });
 
@@ -82,13 +128,21 @@ public static class TagEndpoints
 
         archiverGroup.MapPost("/settings", (
             [FromBody] GlobalArchiverSettingsRequest request,
-            ITagRegistry registry) =>
+            HttpContext httpContext,
+            ITagRegistry registry,
+            IHmiSecurityService security) =>
         {
+            if (!security.IsAuthorized(httpContext, EngineerConfigRoles, out var userName, out var userRole))
+            {
+                return Results.Json(new { error = "Требуются права наладчика или администратора." }, statusCode: 403);
+            }
+
             if (request.DefaultIntervalMs > 0)
             {
                 registry.SetGlobalArchiveInterval(request.DefaultIntervalMs);
             }
 
+            security.LogAudit(userName, userRole, "UPDATE_GLOBAL_ARCHIVE", "all", request, true);
             return Results.Ok(new
             {
                 defaultIntervalMs = registry.DefaultArchiveIntervalMs,

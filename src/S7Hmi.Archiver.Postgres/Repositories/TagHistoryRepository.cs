@@ -49,10 +49,12 @@ public class TagHistoryRepository : ITagHistoryRepository
         SELECT timestamp, tag_id as TagId, value_numeric as ValueNumeric, value_text as ValueText, quality as Quality
         FROM tag_history
         WHERE tag_id = @TagId AND timestamp >= @FromUtc AND timestamp <= @ToUtc
-        ORDER BY timestamp ASC
+        ORDER BY timestamp DESC
         LIMIT @Limit;";
 
         var rows = await connection.QueryAsync<TagHistoryPoint>(sql, new { TagId = tagId, FromUtc = fromUtc, ToUtc = toUtc, Limit = limit });
-        return rows.ToList();
+        var list = rows.ToList();
+        list.Reverse();
+        return list;
     }
 }

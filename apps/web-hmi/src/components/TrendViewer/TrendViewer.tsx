@@ -40,6 +40,8 @@ export const TrendViewer: React.FC<TrendViewerProps> = ({ tags, tagValues, initi
   const [newPresetName, setNewPresetName] = useState<string>('');
 
   const dataBufferRef = useRef<TrendPoint[]>([]);
+  const tagValuesRef = useRef(tagValues);
+  tagValuesRef.current = tagValues;
 
   // Авто-фокус на запрошенном теге из минитренда
   useEffect(() => {
@@ -79,7 +81,7 @@ export const TrendViewer: React.FC<TrendViewerProps> = ({ tags, tagValues, initi
 
         for (const tagId of activeTagIds) {
           try {
-            const res = await fetch(`http://localhost:5000/api/tags/${encodeURIComponent(tagId)}/history?from=${fromUtc}&to=${toUtc}&limit=1000`);
+            const res = await fetch(`/api/tags/${encodeURIComponent(tagId)}/history?from=${fromUtc}&to=${toUtc}&limit=1000`);
             if (res.ok) {
               const data = await res.json();
               data.forEach((item: any) => {
@@ -108,17 +110,18 @@ export const TrendViewer: React.FC<TrendViewerProps> = ({ tags, tagValues, initi
     fetchHistoryFromDb();
   }, [activePresetId, activePens.length]);
 
-  // 2. Сбор непрерывной телеметрии (раз в секунду)
+  // 2. Сбор непрерывной телеметрии (стабильный интервал 1с без сброса таймера при апдейте тегов)
   useEffect(() => {
     if (!isLive) return;
 
     const interval = setInterval(() => {
       const now = Math.floor(Date.now() / 1000);
       const ptValues: Record<string, number | null> = {};
+      const currentTagValues = tagValuesRef.current;
 
-      // Заполняем значениями из tagValues
-      Object.keys(tagValues).forEach((tagId) => {
-        const val = tagValues[tagId]?.value;
+      // Заполняем актуальными значениями из tagValuesRef
+      Object.keys(currentTagValues).forEach((tagId) => {
+        const val = currentTagValues[tagId]?.value;
         ptValues[tagId] = typeof val === 'number' ? val : val === true ? 1 : val === false ? 0 : null;
       });
 
@@ -148,7 +151,7 @@ export const TrendViewer: React.FC<TrendViewerProps> = ({ tags, tagValues, initi
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isLive, tagValues, timeRangeSec]);
+  }, [isLive, timeRangeSec]);
 
   // 3. Выбор пресета
   const handleSelectPreset = (p: TrendPreset) => {

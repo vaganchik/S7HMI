@@ -37,8 +37,9 @@ public class InMemoryHistoryRepository : ITagHistoryRepository
         {
             var points = queue
                 .Where(p => p.Timestamp >= fromUtc && p.Timestamp <= toUtc)
-                .OrderBy(p => p.Timestamp)
+                .OrderByDescending(p => p.Timestamp)
                 .Take(limit)
+                .Reverse()
                 .ToList();
 
             if (points.Count > 0)

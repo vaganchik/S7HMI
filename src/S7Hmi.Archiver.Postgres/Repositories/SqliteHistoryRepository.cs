@@ -62,7 +62,7 @@ public class SqliteHistoryRepository : ITagHistoryRepository
         SELECT timestamp as TimestampStr, tag_id as TagId, value_numeric as ValueNumeric, value_text as ValueText, quality as Quality
         FROM tag_history
         WHERE tag_id = @TagId AND timestamp >= @FromUtcStr AND timestamp <= @ToUtcStr
-        ORDER BY timestamp ASC
+        ORDER BY timestamp DESC
         LIMIT @Limit;";
 
         var fromStr = fromUtc.ToString("o");
@@ -87,6 +87,7 @@ public class SqliteHistoryRepository : ITagHistoryRepository
             result.Add(new TagHistoryPoint(dt, (string)r.TagId, numVal, textVal, quality));
         }
 
+        result.Reverse();
         return result;
     }
 

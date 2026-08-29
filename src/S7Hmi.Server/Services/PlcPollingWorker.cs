@@ -86,12 +86,16 @@ public class PlcPollingWorker : BackgroundService
                     var readResults = await _driver.ReadTagsAsync(tags, stoppingToken);
                     _cache.UpdateValues(readResults);
 
+                    var allRawUpdates = new List<TagValueUpdate>(readResults.Count);
                     var updatesToBroadcast = new List<TagValueUpdate>();
                     var updatesToArchive = new List<TagValueUpdate>();
                     var now = DateTime.UtcNow;
 
                     foreach (var (tagId, tagValue) in readResults)
                     {
+                        var update = new TagValueUpdate(tagId, tagValue.Value, tagValue.Quality, tagValue.Timestamp);
+                        allRawUpdates.Add(update);
+
                         var tagDef = _registry.GetTag(tagId);
                         bool isChanged = false;
 
@@ -119,8 +123,6 @@ public class PlcPollingWorker : BackgroundService
                                 isChanged = true;
                             }
                         }
-
-                        var update = new TagValueUpdate(tagId, tagValue.Value, tagValue.Quality, tagValue.Timestamp);
 
                         if (isChanged)
                         {
@@ -151,14 +153,19 @@ public class PlcPollingWorker : BackgroundService
                         }
                     }
 
-                    // Оценка аварийных условий
+                    // 1. Оценка аварийных условий по каждому качественному отсчету ДО фильтрации deadband (P1)
+                    if (allRawUpdates.Count > 0)
+                    {
+                        _alarmEngine.Evaluate(allRawUpdates);
+                    }
+
+                    // 2. Рассылка изменений клиентам Web-HMI
                     if (updatesToBroadcast.Count > 0)
                     {
-                        _alarmEngine.Evaluate(updatesToBroadcast);
                         await _hubContext.Clients.All.BatchTagsUpdated(updatesToBroadcast);
                     }
 
-                    // Отправка в очередь архивации БД
+                    // 3. Отправка в очередь архивации БД
                     if (updatesToArchive.Count > 0)
                     {
                         await _archiverQueue.EnqueueBatchAsync(updatesToArchive, stoppingToken);

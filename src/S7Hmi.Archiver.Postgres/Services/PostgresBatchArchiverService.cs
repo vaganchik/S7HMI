@@ -10,7 +10,7 @@ namespace S7Hmi.Archiver.Postgres.Services;
 
 /// <summary>
 /// Фоновый сервис пакетной записи истории тегов в PostgreSQL с использованием бинарного импорта
-/// Включает Circuit Breaker для тихого восстановления связи без спама в лог при отсутствии СУБД
+/// Включает Circuit Breaker и буфер повторной отправки (Spooling) для исключения потери пакетов при сбое сети
 /// </summary>
 public class PostgresBatchArchiverService : BackgroundService
 {
@@ -19,6 +19,9 @@ public class PostgresBatchArchiverService : BackgroundService
     private readonly ILogger<PostgresBatchArchiverService> _logger;
     private readonly int _maxBatchSize;
     private readonly TimeSpan _maxWaitTime;
+
+    private readonly List<TagValueUpdate> _retrySpool = [];
+    private const int MaxSpoolCapacity = 50_000;
 
     private DateTime _nextRetryUtc = DateTime.MinValue;
     private bool _schemaInitialized = false;
@@ -39,25 +42,66 @@ public class PostgresBatchArchiverService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("PostgresBatchArchiverService started.");
+        _logger.LogInformation("PostgresBatchArchiverService started with resilient spool buffer.");
 
         await foreach (var batch in _queue.ReadBatchesAsync(_maxBatchSize, _maxWaitTime, stoppingToken))
         {
             if (batch.Count == 0) continue;
 
-            // Circuit breaker check
+            // Если СУБД на тайм-ауте ретрая, складываем пакет в spool-буфер без потери данных
             if (DateTime.UtcNow < _nextRetryUtc)
             {
+                SpoolBatch(batch);
                 continue;
             }
 
-            await WriteBatchToDatabaseAsync(batch, stoppingToken);
+            // Объединяем накопленный spool-буфер с текущим пакетом
+            IReadOnlyList<TagValueUpdate> toWrite;
+            if (_retrySpool.Count > 0)
+            {
+                var combined = new List<TagValueUpdate>(_retrySpool.Count + batch.Count);
+                combined.AddRange(_retrySpool);
+                combined.AddRange(batch);
+                toWrite = combined;
+            }
+            else
+            {
+                toWrite = batch;
+            }
+
+            bool success = await WriteBatchToDatabaseAsync(toWrite, stoppingToken);
+            if (success)
+            {
+                _retrySpool.Clear();
+            }
+            else
+            {
+                // При ошибке сохраняем в spool-буфер
+                SpoolBatch(batch);
+            }
         }
 
         _logger.LogInformation("PostgresBatchArchiverService stopped.");
     }
 
-    private async Task WriteBatchToDatabaseAsync(IReadOnlyList<TagValueUpdate> batch, CancellationToken cancellationToken)
+    private void SpoolBatch(IReadOnlyList<TagValueUpdate> batch)
+    {
+        if (_retrySpool.Count + batch.Count > MaxSpoolCapacity)
+        {
+            int removeCount = (_retrySpool.Count + batch.Count) - MaxSpoolCapacity;
+            if (removeCount < _retrySpool.Count)
+            {
+                _retrySpool.RemoveRange(0, removeCount);
+            }
+            else
+            {
+                _retrySpool.Clear();
+            }
+        }
+        _retrySpool.AddRange(batch);
+    }
+
+    private async Task<bool> WriteBatchToDatabaseAsync(IReadOnlyList<TagValueUpdate> batch, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
@@ -124,12 +168,14 @@ public class PostgresBatchArchiverService : BackgroundService
 
             await writer.CompleteAsync(cancellationToken);
             sw.Stop();
-            _logger.LogDebug("Archived {Count} tags to PostgreSQL in {ElapsedMs:F1} ms", batch.Count, sw.Elapsed.TotalMilliseconds);
+            _logger.LogDebug("Archived {Count} tags to PostgreSQL in {ElapsedMs:F1} ms (Spool={SpoolCount})", batch.Count, sw.Elapsed.TotalMilliseconds, _retrySpool.Count);
+            return true;
         }
         catch (Exception ex)
         {
-            _nextRetryUtc = DateTime.UtcNow.AddSeconds(30);
-            _logger.LogWarning("PostgreSQL is currently unreachable ({Msg}). Retrying in 30s... Polling remains fully active.", ex.Message);
+            _nextRetryUtc = DateTime.UtcNow.AddSeconds(15);
+            _logger.LogWarning("PostgreSQL is currently unreachable ({Msg}). Spooled {Count} items in memory buffer. Retrying in 15s...", ex.Message, _retrySpool.Count);
+            return false;
         }
     }
 }

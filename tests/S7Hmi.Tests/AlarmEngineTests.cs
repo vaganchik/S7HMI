@@ -68,4 +68,25 @@ public class AlarmEngineTests
         };
         Assert.Equal(TagCategory.Analog, realTag.Category);
     }
+
+    [Fact]
+    public void AlarmEngine_Triggers_On_Small_Change_If_Threshold_Exceeded()
+    {
+        var engine = new AlarmEngine();
+        engine.RegisterAlarm(new AlarmDefinition
+        {
+            Id = "alarm.temp.high",
+            TagId = "furnace.temp",
+            Condition = AlarmCondition.GreaterThan,
+            Setpoint = 100.0,
+            Severity = AlarmSeverity.Critical,
+            Message = "Перегрев"
+        });
+
+        engine.Evaluate([new TagValueUpdate("furnace.temp", 100.1, TagQuality.Good, DateTime.UtcNow)]);
+
+        var activeList = engine.GetActiveAlarms();
+        Assert.Single(activeList);
+        Assert.Equal("alarm.temp.high", activeList[0].AlarmId);
+    }
 }

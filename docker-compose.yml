@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  # 1. База данных PostgreSQL с расширением TimescaleDB
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: s7_timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: s7_scada
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d s7_scada"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Сервер связи с ПЛК (.NET 8/9 C#)
+  s7-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: s7_hmi_server
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      - ConnectionStrings__Postgres=Host=timescaledb;Port=5432;Database=s7_scada;Username=postgres;Password=postgres;
+      - PlcConnection__IpAddress=192.168.0.1
+      - PlcConnection__CpuType=S71500
+      - UseSimulator=true
+    ports:
+      - "5000:5000"
+
+  # 3. Web-HMI Фронтенд (Nginx + React)
+  web-hmi:
+    build:
+      context: ./apps/web-hmi
+      dockerfile: Dockerfile
+    container_name: s7_web_hmi
+    restart: unless-stopped
+    depends_on:
+      - s7-server
+    ports:
+      - "3000:80"
+
+volumes:
+  pgdata:

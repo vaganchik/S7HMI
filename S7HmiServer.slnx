@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/S7Hmi.Archiver.Postgres/S7Hmi.Archiver.Postgres.csproj" />
+    <Project Path="src/S7Hmi.Core/S7Hmi.Core.csproj" />
+    <Project Path="src/S7Hmi.Driver.S7/S7Hmi.Driver.S7.csproj" />
+    <Project Path="src/S7Hmi.Server/S7Hmi.Server.csproj" />
+    <Project Path="src/S7Hmi.TiaOpenness/S7Hmi.TiaOpenness.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/S7Hmi.Tests/S7Hmi.Tests.csproj" />
+  </Folder>
+</Solution>

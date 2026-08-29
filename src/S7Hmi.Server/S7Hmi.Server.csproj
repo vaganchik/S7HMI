@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\S7Hmi.Core\S7Hmi.Core.csproj" />
+    <ProjectReference Include="..\S7Hmi.Driver.S7\S7Hmi.Driver.S7.csproj" />
+    <ProjectReference Include="..\S7Hmi.TiaOpenness\S7Hmi.TiaOpenness.csproj" />
+    <ProjectReference Include="..\S7Hmi.Archiver.Postgres\S7Hmi.Archiver.Postgres.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>

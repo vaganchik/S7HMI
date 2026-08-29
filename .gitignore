@@ -1,0 +1,34 @@
+# .NET build artifacts
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+.vs/
+
+# Node.js & Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Database & runtime files
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.DS_Store
+Thumbs.db
+
+# Agent temp
+.agent/

@@ -1,0 +1,22 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
+WORKDIR /app
+
+COPY S7HmiServer.sln ./
+COPY src/S7Hmi.Core/S7Hmi.Core.csproj src/S7Hmi.Core/
+COPY src/S7Hmi.Driver.S7/S7Hmi.Driver.S7.csproj src/S7Hmi.Driver.S7/
+COPY src/S7Hmi.TiaOpenness/S7Hmi.TiaOpenness.csproj src/S7Hmi.TiaOpenness/
+COPY src/S7Hmi.Archiver.Postgres/S7Hmi.Archiver.Postgres.csproj src/S7Hmi.Archiver.Postgres/
+COPY src/S7Hmi.Server/S7Hmi.Server.csproj src/S7Hmi.Server/
+COPY tests/S7Hmi.Tests/S7Hmi.Tests.csproj tests/S7Hmi.Tests/
+
+RUN dotnet restore src/S7Hmi.Server/S7Hmi.Server.csproj
+
+COPY . ./
+RUN dotnet publish src/S7Hmi.Server/S7Hmi.Server.csproj -c Release -o /out
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview AS runtime
+WORKDIR /app
+COPY --from=build /out ./
+ENV ASPNETCORE_URLS=http://+:5000
+EXPOSE 5000
+ENTRYPOINT ["dotnet", "S7Hmi.Server.dll"]
